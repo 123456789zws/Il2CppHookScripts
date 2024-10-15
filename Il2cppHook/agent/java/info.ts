@@ -1,7 +1,7 @@
 import { Application } from "../expand/TypeExtends/mscorlibObj/Application/export"
 import { Environment } from "../expand/TypeExtends/mscorlibObj/Environment/export"
 import { SystemInfo } from "../expand/TypeExtends/mscorlibObj/SystemInfo/export"
-import { getMethodDesFromMethodInfo as DM } from "../bridge/fix/il2cppM"
+import { getMethodDesFromMethodInfo as DM, getMethodDesFromMethodInfo, getModifier, methodToString } from "../bridge/fix/il2cppM"
 import { Time } from "../expand/TypeExtends/mscorlibObj/Times/export"
 import { formartClass as FM } from "../utils/formart"
 import { distance } from "fastest-levenshtein"
@@ -150,6 +150,21 @@ const findClasses = (filterClassName: string, completeMatch: boolean = false, re
     newLine(1)
 }
 
+const printExp = (filter: string = "", clazzOrFindAll: string | boolean, formartMaxLine: number = -1, retArr: boolean = false, accurate: boolean = false) => {
+
+    const printExpAll = (filter: string = "", findAll: boolean = true, formartMaxLine: number, retArr: boolean, accurate: boolean): void | Array<Il2Cpp.Method> => {
+        printExpInner(filter, "", findAll, formartMaxLine, retArr, accurate)
+    }
+    
+    const printExpAss = (filter: string = "", clazz: string = "", formartMaxLine: number, retArr: boolean, accurate: boolean): void | Array<Il2Cpp.Method> => {
+        printExpInner(filter, clazz, false, formartMaxLine, retArr, accurate)
+    }
+    
+    return typeof clazzOrFindAll == "boolean" ?
+        printExpAll(filter, clazzOrFindAll, formartMaxLine, retArr, accurate) :
+        printExpAss(filter, clazzOrFindAll, formartMaxLine, retArr, accurate)
+}
+
 /**
  * 过滤并展示一些常用好用的函数及其地址
  * filter and show some useful methods
@@ -160,7 +175,7 @@ const findClasses = (filterClassName: string, completeMatch: boolean = false, re
  * @param accurate          是否准且匹配 仅在findAll为true时生效
  * @returns 
  */
-const printExp = (filter: string = "", findAll: boolean = true, formartMaxLine: number = -1, retArr: boolean = false, accurate: boolean = false): void | Array<Il2Cpp.Method> => {
+const printExpInner = (filter: string = "", clazz: string | boolean = "", findAll: boolean = true, formartMaxLine: number = -1, retArr: boolean = false, accurate: boolean = false): void | Array<Il2Cpp.Method> => {
 
     let countIndex: number = -1
     let arrStrResult: Array<string> = new Array<string>()
@@ -169,25 +184,35 @@ const printExp = (filter: string = "", findAll: boolean = true, formartMaxLine: 
     let enterTime: number = Date.now()
 
     try {
-        // libil2cpp.so common export function
-        findExport("il2cpp_", "libil2cpp.so", (item: ModuleExportDetails) => {
-            if (item.type == "function" && item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveModuleDetails(item)
-        })
+        if (typeof clazz == "string" && clazz != "" && Module.findBaseAddress(clazz) != null) {
+            findExport(filter, clazz, (item: ModuleExportDetails | ModuleSymbolDetails) => {
+                if (item.type == "function" && item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveModuleDetails(item)
+            })
+        } else {
+            // libil2cpp.so common export function
+            findExport("il2cpp_", "libil2cpp.so", (item: ModuleExportDetails | ModuleSymbolDetails) => {
+                if (item.type == "function" && item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveModuleDetails(item)
+            })
 
-        findExport("", "libunity.so", (item: ModuleExportDetails) => {
-            if (item.type == "function" && item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveModuleDetails(item)
-        })
+            findExport("", "libunity.so", (item: ModuleExportDetails | ModuleSymbolDetails) => {
+                if (item.type == "function" && item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveModuleDetails(item)
+            })
+        }
     } catch (error) { LOGE(error) }
 
-    // 查找所有函数
-    if (findAll) {
+    if (typeof clazz == "string" && clazz != "") {
+        const clazzPtr = findClass(clazz)
+        if (clazz != undefined) {
+            new Il2Cpp.Class(clazzPtr).methods.forEach(formartAndSaveIl2cppMehods)
+        } else {
+            LOGW(`[!] Class: ${clazz} not found!`)
+        }
+    } else if (findAll) {
         if (allMethodsCacheArray.length == 0) cacheMethods()
         allMethodsCacheArray
             .filter((item: Il2Cpp.Method) => accurate ? item.name == filter : item.name.toLocaleLowerCase().includes(filter.toLowerCase()))
             .forEach(formartAndSaveIl2cppMehods)
-    }
-    // 查找常用的一些函数
-    else {
+    } else {
         new Il2Cpp.Class(findClass("Transform")).methods.forEach((item: Il2Cpp.Method) => {
             if (item.name.toLocaleLowerCase().includes(filter.toLowerCase())) formartAndSaveIl2cppMehods(item)
         })
@@ -235,7 +260,7 @@ const printExp = (filter: string = "", findAll: boolean = true, formartMaxLine: 
     if (formartMaxLine != -1 && formartMaxLine < 100) LOGZ(`\n${formartMaxLine} lines of results are shown recommended to be greater than 100`)
     newLine()
 
-    function formartAndSaveModuleDetails(item: ModuleExportDetails) {
+    function formartAndSaveModuleDetails(item: ModuleExportDetails | ModuleSymbolDetails) {
         if (retArr) return
         let index = FM.alignStr(`[${++countIndex}]`, 6)
         let result = `${index} ${FM.alignStr(item.address, p_size * 4)}  --->   ${item.address.sub(soAddr)}\t${item.name}`
@@ -259,6 +284,98 @@ const printExp = (filter: string = "", findAll: boolean = true, formartMaxLine: 
             arrVirResult.push(result)
         }
     }
+}
+
+/**
+ * find methods in class | do not cache ! { avoid cost to much time to cache all methods }
+ * @param filter filter method name
+ * @param className class name or class ptr
+ * @param sort sort by modifier ?
+ * @example
+ * findMethodsInClass("Damage", "CNRDPassiveObject")
+ * findMethodsInClass("", "CNRDPassiveObject", false)
+ * findMethodsInClass("*", "CNRDPassiveObject")
+ * findMethodsInClass("public Int64*", "CNRDPassiveObject")
+ */
+const findMethodsInClass = (filter: string, className: string | NativePointer | number, sort: boolean = true) => {
+    let classInfo: null | Il2Cpp.Class
+
+    if (filter == undefined) throw new Error("Filter MethodName is empty")
+    if (className == undefined) throw new Error("Class name is empty")
+    if (filter == '*') filter = ''
+
+    if (typeof className == "number") {
+        classInfo = new Il2Cpp.Class(ptr(className))
+    } else if (typeof className == "string") {
+        const clsptr: NativePointer = findClass(className)
+        if (clsptr == null) throw new Error(`Can't find class by name ${className}`)
+        classInfo = new Il2Cpp.Class(ptr(clsptr as unknown as number))
+    } else {
+        classInfo = new Il2Cpp.Class(className)
+    }
+
+    if (classInfo == null) throw new Error("Class is null")
+
+    const fullMatch: boolean = filter.length > 1 && filter.includes("*")
+
+    newLine()
+    let index: number = 0
+    if (sort) {
+        const groupedMethods = classInfo.methods
+            .sort((a: Il2Cpp.Method, b: Il2Cpp.Method) => b.flags - a.flags)
+            .reduce((acc, cur) => {
+                let modifier: string
+                try {
+                    modifier = getModifier(cur.flags)
+                } catch (error) {
+                    modifier = cur.modifier
+                }
+                if (!acc[modifier]) {
+                    acc[modifier] = []
+                }
+                acc[modifier].push(cur)
+                return acc
+            }, {} as { [key: string]: Il2Cpp.Method[] })
+
+        for (const key in groupedMethods) {
+            const element = groupedMethods[key]
+            const sizeofElement = FM.alignStr(`[ ${element.length} ]`, 8)
+            LOGE(`>>> ${sizeofElement}| ${key}`)
+            element.forEach((item: Il2Cpp.Method) => {
+                let onMatch = false
+                try {
+                    // `match` might throw error
+                    onMatch = fullMatch ?
+                        getMethodDesFromMethodInfo(item).toLocaleLowerCase().match(filter.toLowerCase()) != null :
+                        item.name.toLocaleLowerCase().includes(filter.toLowerCase())
+                } catch (error) {
+                    // LOGZ(`Error: ${error}`)
+                }
+                if (onMatch) {
+                    const virAddr = FM.alignStr(item.handle, p_size * 3) + (item.virtualAddress.isNull() ? '' : ` --->  ${FM.alignStr(item.relativeVirtualAddress, 12)}`)
+                    const className = FM.alignStr(item.class.name, 20)
+                    const result = `${FM.alignStr(`[${++index}]`, 6)} ${virAddr}  |  ${className} @ ${item.class.handle} |  ${DM(item)}`
+                    LOGD(result)
+                }
+            })
+        }
+    } else {
+        classInfo.methods.forEach((item: Il2Cpp.Method) => {
+            if (item.name.toLocaleLowerCase().includes(filter.toLowerCase())) {
+                let modifier: string
+                try {
+                    modifier = getModifier(item.flags)
+                } catch (error) {
+                    modifier = item.modifier.toString()
+                }
+                const virAddr = FM.alignStr(item.handle, p_size * 3) + (item.virtualAddress.isNull() ? '' : ` --->  ${FM.alignStr(item.relativeVirtualAddress, 12)}`)
+                const className = FM.alignStr(item.class.name, 20)
+                const result = `${FM.alignStr(`[${++index}]`, 6)} ${virAddr}  |  ${className} @ ${item.class.handle} |  ${DM(item)}`
+                LOGD(result)
+            }
+        })
+    }
+    newLine()
 }
 
 const AddressToMethod = (mPtr: NativePointer | number, withLog: boolean = true): Il2Cpp.Method => {
@@ -390,11 +507,12 @@ export { getApkInfo, launchApp, cacheMethods, findClasses, functionProbe }
 globalThis.getApkInfo = getApkInfo
 
 Reflect.set(globalThis, "launchApp", launchApp)
-Reflect.set(globalThis, "findMethods", printExp)
+Reflect.set(globalThis, "findMethods",printExp)
 Reflect.set(globalThis, "findClasses", findClasses)
 Reflect.set(globalThis, "getUnityInfo", getUnityInfo)
 Reflect.set(globalThis, "functionProbe", functionProbe)
 Reflect.set(globalThis, "AddressToMethod", AddressToMethod)
+Reflect.set(globalThis, "findMethodsInClass", findMethodsInClass)
 Reflect.set(globalThis, "AddressToMethodToString", AddressToMethodToShow)
 Reflect.set(globalThis, "AddressToMethodNoException", AddressToMethodNoException)
 // Reflect.set(globalThis, "showMethodInfoFromAddress", showMethodInfoFromAddress)
@@ -409,5 +527,6 @@ declare global {
     var AddressToMethod: (mPtr: NativePointer | number, withLog?: boolean) => Il2Cpp.Method
     var AddressToMethodNoException: (mPtr: NativePointer, withLog?: boolean) => Il2Cpp.Method | null
     var findMethods: (filter: string, findAll?: boolean, formartMaxLine?: number, retArr?: boolean, accurate?: boolean) => void | Array<Il2Cpp.Method>
+    var findMethodsInClass: (filter: string, className: string | NativePointer | number, sort?: boolean) => void
     var findClasses: (filterClassName: string, completeMatch?: boolean, retArray?: boolean) => void | Il2Cpp.Class[]
 }

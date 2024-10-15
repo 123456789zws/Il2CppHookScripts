@@ -2,6 +2,8 @@
 
 ### frida-based libil2cpp.so runtime parsing script
 
+[**简体中文**](README.zh-CN.md)
+
 [![npm license](https://img.shields.io/npm/l/il2cpp-hooker.svg)](https://www.npmjs.com/package/il2cpp-hooker)
 ![Build Status](https://github.com/axhlzy/Il2CppHookScripts/actions/workflows/Auto-build.yml/badge.svg)
 [![Open in Dev Containers](https://img.shields.io/static/v1?label=Dev%20Containers&message=Open&color=blue&logo=visualstudiocode)](https://vscode.dev/redirect?url=vscode://ms-vscode-remote.remote-containers/cloneInVolume?url=https://github.com/axhlzy/Il2CppHookScripts)
@@ -10,16 +12,19 @@
 
 #### Features 
 
-- Parse Unity's method `m` / class `c` / field `f` / instance `lfs`
-- parse runtime method argument `b`
-- (Batch) Hook `B/BF` for commonly used functions, modify function return value `setFunctionXXX`
-- More convenient to find function `findMethods` and call function `callFunction`
+- Parse Unity's method `m` / class `c` / field `f` / instance `lfs` / `lfp`
+- parse runtime method argument `b` / `bt` / nop function `n` / detachAll and clean cache `D`
+- (Batch) Hook `B/BF/BN` for commonly used functions, modify function return value `setFunctionXXX`, `setActive` to set gameobject active
+- Wrapped "Interceptor.attach" to make it easier to use from the command line `A(ptr,(args)=>{},(ret)=>{})`
+- More convenient to find function `findMethods` / `findClasses` and call function `callFunction` / `findExport` to find exports function
+- `showMethodInfo` help us to Simply get the details of an Il2cppMethod*, and getting the details of a game object use`showGameObject` 
 - Object hierarchy `PrintHierarchy` / type hierarchy `showTypeParent`
-- Disassemble `showAsm` with frida and method information
-- Commonly used Hook package `HookOnPointerClick/HookSetActive/B_Button...`
-- Parse mount script `showComponents alias s` `HookOnPointerClick/PrintHierarchyWithComponents` is also introduced <--- testing
-- JNI RegisterNatives Hook (impl in JNIHelper, default off [not stable]), using JNIHelper.cacheRegisterNativeItem to get info
-- Using QBDI to simulate the execution of the function, using t(methoinfo) or traceFunction(mPtr) to enable replacement hook
+- Disassemble `showAsm` with frida and method information, `seeHexA` means hexdump
+- `breakWithStack` More symbol parsing for il2cpp, `breakWithArgs` just show args
+- Commonly used Hook package `HookOnPointerClick` / `HookSetActive` / `B_Button` / `HookPlayerPrefs` soon ...
+- Parse mount script `showComponents` alias `PrintHierarchyWithComponents` is also introduced !not alway work!
+- JNI RegisterNatives Hook (impl in JNIHelper, default off [not stable]), using JNIHelper.cacheRegisterNativeItem to get info !testing!
+- Using QBDI to simulate the execution of the function, using t(methoinfo) or traceFunction(mPtr) to enable replacement hook !testing!
 - :confused: :confused: :confused:
 
 -------
@@ -92,6 +97,13 @@ $ frida -FU -l ../_Ufunc.js
 
 -------
 
+#### 👇 Here's a simpler way to use it (Recommended)
+`frida --codeshare axhlzy/il2cpphookscripts  -U -f ${PackageName}`
+
+> Requires Scientific Internet Access
+
+-------
+
 > [!NOTE]
 > The npm package may not be updated in time, so you may consider using `fat -c` to open the project and use the `github action` [Artifacts](https://github.com/axhlzy/Il2CppHookScripts/actions) to replace _Ufunc.js file. :hushed:
 
@@ -104,3 +116,13 @@ $ frida -FU -l ../_Ufunc.js
 OR
 
 open with vscode and search `globalthis.` to find more useage
+
+-------
+
+Buy the author a cup of coffee (^_^)
+
+<img src=https://github.com/axhlzy/Il2CppHookScripts/assets/20512058/618a0674-e5ad-4c0f-9435-f7e133d4b293 width="300" height="400">
+
+<!-- qq:597290673 -->
+<!-- wx:axhlzy0922 -->
+<!-- tg:axhlzy -->

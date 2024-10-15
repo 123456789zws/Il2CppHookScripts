@@ -6,7 +6,7 @@ import {
 import { PassType, TIME_SIMPLE } from "../utils/common"
 import { formartClass as FC } from "../utils/formart"
 import { closest } from "fastest-levenshtein"
-import ValueResolve from "./valueResolve"
+import { ValueResolve } from "./valueResolve"
 import { HookerBase } from "./base"
 import { JSHOOKTYPE } from "./enum"
 
@@ -14,9 +14,9 @@ type SpecialClass = "CommonClass" | "JNI" | "AUI" | "Soon"
 const CommonClass = ["Assembly-CSharp", "MaxSdk.Scripts", "Game", "Zenject", "UniRx", "Purchasing.Common", "UnityEngine.Purchasing"]
 export class Breaker {
 
-    public static maxCallTimes: number = 10     // 出现 ${maxCallTimes} 次后不再显示
-    public static detachTimes: number = 500     // 出现 ${detachTimes}  次后取消 hook
-    private static callTimesInline: number = 0  // log行间暂时的编号
+    private static _maxCallTimes: number = 10     // 出现 ${maxCallTimes} 次后不再显示
+    private static _detachTimes: number = 500     // 出现 ${detachTimes}  次后取消 hook
+    private static _callTimesInline: number = 0   // log行间暂时的编号
     public static map_attachedMethodInfos: Map<Il2Cpp.Method, InvocationListener> = new Map()
     private static map_methodInfo_callTimes: Map<Il2Cpp.Method, number> = new Map()
     private static array_methodInfo_detached: Array<Il2Cpp.Method> = new Array<Il2Cpp.Method>()
@@ -78,7 +78,7 @@ export class Breaker {
                 let classHandle = imgOrClsPtr
                 let currentCls: Il2Cpp.Class = new Il2Cpp.Class(classHandle)
                 if (currentCls.isEnum) throw new Error("can't attach enum class")
-                if (currentCls.isAbstract) throw new Error("can't attach abstract class")
+                // if (currentCls.isAbstract) throw new Error("can't attach abstract class")
                 FC.printTitile(`Found : ClassName: ${currentCls.name} @ ${classHandle}`)
                 currentCls.methods.forEach(Breaker.attachMethod)
             }
@@ -99,7 +99,7 @@ export class Breaker {
                 FC.printTitile(`Found : ClassName: ${clsTmp.name} @ ${clsTmp.handle}`)
                 innerImage(clsTmp.handle)
                 // innerImage(Il2Cpp.Domain.assembly("UnityEngine.AndroidJNIModule").image.class("UnityEngine.AndroidJNIHelper").handle)
-            } else if ("AUI") {
+            } else if (type == "AUI") {
                 innerImage(Il2Cpp.Domain.assembly("Assembly-CSharp").image.handle)
                 setTimeout(() => h("Update"), 3000)
             } else if (type == "Soon") {
@@ -137,8 +137,19 @@ export class Breaker {
                     // detailLog 详细或者粗略的LOG（是否带参数解析）
                     if (!detailLog) {
                         // 批量版 B() 针对单个classes/Images
-                        let cacheID = `[${++Breaker.callTimesInline}|${TIME_SIMPLE()}]`
-                        this.passValue = new ValueResolve(cacheID, method).setArgs(args)
+                        let cacheID = `[${++Breaker._callTimesInline}|${TIME_SIMPLE()}]`
+                        try {
+                            // InvocationArguments should be NativePointer[] but not always recognize as NativePointer[]
+                            // in windows might be error, in linux can case error
+                            this.passValue = new ValueResolve(cacheID, method).setArgs(args)
+                        } catch {
+                            if (method.isStatic) {
+                                this.passValue = new ValueResolve(cacheID, method).setArgs([NULL])
+                            } else {
+                                // deal with the error of RangeError: Invalid array length
+                                this.passValue = new ValueResolve(cacheID, method).setArgs([args[0], args[1], args[2], args[3]])
+                            }
+                        }
                         return LOGD((this.passValue as ValueResolve).toString())
                     } else {
                         // 详细版 b() 针对单个函数
@@ -176,7 +187,7 @@ export class Breaker {
                         this.content = tmp_content
                         let clsStr = `${method.class.namespace}`
                         let classTitle = `${clsStr.length == 0 ? "" : clsStr + "."}${method.class.name}`
-                        let disptitle = `${classTitle} | ${methodToString(method, true)}\t [${method.handle} -> ${method.virtualAddress} -> ${method.relativeVirtualAddress}] | ${TIME_SIMPLE()}`
+                        let disptitle = `${classTitle} | ${methodToString(method, true)}\t [ ${method.handle} -> ${method.virtualAddress} -> ${method.relativeVirtualAddress} ] | ${TIME_SIMPLE()}`
                         this.disp_title = disptitle
                     }
                 },
@@ -203,7 +214,7 @@ export class Breaker {
         } catch { catchError(method) }
 
         function catchError(method: Il2Cpp.Method): void {
-            LOGE(methodToString(method, false, '[-]'))
+            LOGE(methodToString(method, false, '[!]'))
             if (Process.arch == "arm") {
                 let ins = method.virtualAddress.readPointer()
                 if (ins != null && ins.equals(0xE12FFF1E)) showErrorLog(ins)
@@ -228,12 +239,12 @@ export class Breaker {
             if (!Breaker.map_methodInfo_callTimes.has(method)) Breaker.map_methodInfo_callTimes.set(method, 0)
             let times = Breaker.map_methodInfo_callTimes.get(method)
             if (times === undefined || times === null) times = 0
-            if (times >= Breaker.detachTimes) {
+            if (times >= Breaker._detachTimes) {
                 Breaker.map_attachedMethodInfos.get(method)!.detach()
                 Breaker.array_methodInfo_detached.push(method)
             }
             if (enterType === "onEnter") Breaker.map_methodInfo_callTimes.set(method, times + 1)
-            return times < Breaker.maxCallTimes
+            return times < Breaker._maxCallTimes
         } else {
             throw new Error("method must be Il2Cpp.Method")
         }
@@ -286,12 +297,18 @@ export class Breaker {
         }, (retval: InvocationReturnValue) => LOGD(`Retval\t---> ${retval}`))
     }
 
-    static breakWithStack = (mPtr: NativePointer, accurate: boolean = true) => {
+    /**
+     * print stack trace
+     * @param mPtr function address
+     * @param accurate is accurate (default true)
+     * @param parseIl2cppMethodName enable parse il2cpp method name in stack (default true)
+     */
+    static breakWithStack = (mPtr: NativePointer, accurate: boolean = true, parseIl2cppMethodName:boolean = true) => {
         mPtr = this.fakeMethodPtr(mPtr, JSHOOKTYPE.STACK)
         A(mPtr, (_args: InvocationArguments, ctx: CpuContext, _passValue: Map<PassType, any>) => {
             LOGO(`\n${getLine(65)}\n`)
             LOGH(`Called from ${mPtr} ---> ${mPtr.sub(soAddr)}\t|  LR : ${checkCtx(getPlatformCtx(ctx))}\n`)
-            PrintStackTraceNative(ctx, accurate)
+            PrintStackTraceNative(ctx, accurate, false, 6, parseIl2cppMethodName)
             LOGO(`\n${getLine(65)}`)
         })
     }
@@ -299,10 +316,10 @@ export class Breaker {
     // arm32 example : breakInline(0x12345678,(ctx)=>{LOGD(ctx.r0)})
     static breakInline = (mPtr: NativePointer, callback?: (value: CpuContext) => void) => {
         let localPtr: NativePointer = checkPointer(mPtr)
-        LOGD(`[+] add BP ( ${this.HookTypeToString(JSHOOKTYPE.INLINE)} ) | ${mPtr} - ${localPtr}`)
+        LOGD(`[+] add BP ( ${this.HookTypeToString(JSHOOKTYPE.INLINE)} ) | ${ptr(mPtr as unknown as string)} - ${localPtr}`)
         A(localPtr, (_args: InvocationArguments, ctx: CpuContext, _passValue: Map<PassType, any>) => {
             LOGO(`\n${getLine(65)}`)
-            LOGH(`Called from ${localPtr} ---> ${mPtr.sub(soAddr)}\t|  LR : ${checkCtx(getPlatformCtx(ctx))}\n`)
+            LOGH(`Called from ${localPtr} ---> ${localPtr.sub(soAddr)}\t|  LR : ${checkCtx(getPlatformCtx(ctx))}\n`)
             callback == undefined ? LOGD(JSON.stringify(ctx)) : callback(ctx)
         })
     }
@@ -371,7 +388,7 @@ export class Breaker {
         LOGM(`${title}`)
         // 筛选 Breaker.map_methodInfo_callTimes 调用次数大雨 maxCallTimes 的方法
         Breaker.map_methodInfo_callTimes.forEach((value: number, method: Il2Cpp.Method) => {
-            if (value >= Breaker.maxCallTimes) {
+            if (value >= Breaker._maxCallTimes) {
                 if (filterName == "" || method.name.indexOf(filterName) != -1) {
                     let arr = methodToArray(method)
                     let times = this.map_methodInfo_callTimes.get(method)
@@ -405,6 +422,22 @@ export class Breaker {
         if (detachAll) D()
         Breaker.array_methodValue_cache.slice(start, end).forEach(LOGD)
     }
+
+    public static get maxCallTimes(): number {
+        return Breaker._maxCallTimes
+    }
+
+    public static set maxCallTimes(value: number) {
+        Breaker._maxCallTimes = value
+    }
+
+    public static get detachTimes(): number {
+        return Breaker._detachTimes
+    }
+
+    public static set detachTimes(value: number) {
+        Breaker._detachTimes = value
+    }
 }
 
 globalThis.maxCallTimes = Breaker.maxCallTimes
@@ -418,6 +451,7 @@ globalThis.breakWithStack = Breaker.breakWithStack
 globalThis.breakInline = Breaker.breakInline
 globalThis.breakMemRW = Breaker.breakMemRW
 globalThis.printDesertedMethods = Breaker.printDesertedMethods // 展示 已经被取消hook 或者 不显示的部分函数
+globalThis.prd = Breaker.printDesertedMethods // alias printDesertedMethods
 globalThis.bt = (mPtr: NativePointer | number) => b(AddressToMethod(mPtr))
 globalThis.BN = (namespace: string) => Breaker.addBreakPoint("", namespace) // <- alias B(`NameSpace`)
 globalThis.getPlatform = (): string => (Process.platform == "linux" && Process.pageSize == 0x4) ? "arm" : "arm64"
@@ -527,64 +561,11 @@ globalThis.BFA = (filterStr: string, allImg: boolean = true): void => {
  */
 globalThis.getPlatformCtxWithArgV = <T extends CpuContext>(ctx: T, argIndex: number): NativePointer | undefined => {
     if ((ctx as ArmCpuContext).r0 != undefined) {
-        // case arm32
-        switch (argIndex) {
-            case 0: return (ctx as ArmCpuContext).r0
-            case 1: return (ctx as ArmCpuContext).r1
-            case 2: return (ctx as ArmCpuContext).r2
-            case 3: return (ctx as ArmCpuContext).r3
-            case 4: return (ctx as ArmCpuContext).r4
-            case 5: return (ctx as ArmCpuContext).r5
-            case 6: return (ctx as ArmCpuContext).r6
-            case 7: return (ctx as ArmCpuContext).r7
-            case 8: return (ctx as ArmCpuContext).r8
-            case 9: return (ctx as ArmCpuContext).r9
-            case 10: return (ctx as ArmCpuContext).r10
-            case 11: return (ctx as ArmCpuContext).r11
-            case 12: return (ctx as ArmCpuContext).r12
-            case 13: return (ctx as ArmCpuContext).sp
-            case 14: return (ctx as ArmCpuContext).lr
-            case 15: return (ctx as ArmCpuContext).pc
-            default: throw new Error(`ARM32 -> argIndex ${argIndex} is out of range`)
-        }
+        if (argIndex > 15 || argIndex < 0) throw new Error(`ARM32 -> argIndex ${argIndex} is out of range`)
+        return eval(`(ctx as ArmCpuContext).r${argIndex}`) as NativePointer
     } else {
-        // case arm64
-        switch (argIndex) {
-            case 0: return (ctx as Arm64CpuContext).x0
-            case 1: return (ctx as Arm64CpuContext).x1
-            case 2: return (ctx as Arm64CpuContext).x2
-            case 3: return (ctx as Arm64CpuContext).x3
-            case 4: return (ctx as Arm64CpuContext).x4
-            case 5: return (ctx as Arm64CpuContext).x5
-            case 6: return (ctx as Arm64CpuContext).x6
-            case 7: return (ctx as Arm64CpuContext).x7
-            case 8: return (ctx as Arm64CpuContext).x8
-            case 9: return (ctx as Arm64CpuContext).x9
-            case 10: return (ctx as Arm64CpuContext).x10
-            case 11: return (ctx as Arm64CpuContext).x11
-            case 12: return (ctx as Arm64CpuContext).x12
-            case 13: return (ctx as Arm64CpuContext).x13
-            case 14: return (ctx as Arm64CpuContext).x14
-            case 15: return (ctx as Arm64CpuContext).x15
-            case 16: return (ctx as Arm64CpuContext).x16
-            case 17: return (ctx as Arm64CpuContext).x17
-            case 18: return (ctx as Arm64CpuContext).x18
-            case 19: return (ctx as Arm64CpuContext).x19
-            case 20: return (ctx as Arm64CpuContext).x20
-            case 21: return (ctx as Arm64CpuContext).x21
-            case 22: return (ctx as Arm64CpuContext).x22
-            case 23: return (ctx as Arm64CpuContext).x23
-            case 24: return (ctx as Arm64CpuContext).x24
-            case 25: return (ctx as Arm64CpuContext).x25
-            case 26: return (ctx as Arm64CpuContext).x26
-            case 27: return (ctx as Arm64CpuContext).x27
-            case 28: return (ctx as Arm64CpuContext).x28
-            case 29: return (ctx as Arm64CpuContext).fp
-            case 30: return (ctx as Arm64CpuContext).lr
-            case 31: return (ctx as Arm64CpuContext).sp
-            case 32: return (ctx as Arm64CpuContext).pc
-            default: throw new Error(`ARM64 -> argIndex ${argIndex} is out of range`)
-        }
+        if (argIndex > 32 || argIndex < 0) throw new Error(`ARM64 -> argIndex ${argIndex} is out of range`)
+        return eval(`(ctx as Arm64CpuContext).x${argIndex}`) as NativePointer
     }
 }
 
@@ -602,13 +583,14 @@ declare global {
     var BM: (className: string) => void
     var breakWithArgs: (mPtr: NativePointer, argCount?: number) => void
     var breakInline: (mPtr: NativePointer, callback?: (value: CpuContext) => void) => void
-    var breakWithStack: (mPtr: NativePointer, accurate?: boolean) => void
+    var breakWithStack: (mPtr: NativePointer, accurate?: boolean, parseIl2cppMethodName?:boolean) => void
     var breakMemRW: (mPtr: NativePointer, length?: number) => void
     var getPlatform: () => string
     var getPlatformCtx: (ctx: CpuContext) => ArmCpuContext | Arm64CpuContext
     var getPlatformCtxWithArgV: <T extends CpuContext>(ctx: T, argIndex: number) => NativePointer | undefined
     var maxCallTimes: number
     var attathing: boolean
+    var prd: (filterName?: string) => void
     var printDesertedMethods: (filterName?: string) => void
     var printCurrentMethods: () => void
 }

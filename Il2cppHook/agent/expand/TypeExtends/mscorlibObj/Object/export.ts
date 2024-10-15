@@ -4,16 +4,21 @@ import { UnityEngine_Object } from "./class"
 export { getObjName, getObjClass }
 
 globalThis.getObjName = (mPtr: NativePointer): string => {
-    if (mPtr instanceof NativePointer && !mPtr.isNull()) {
-        return new mscorlib_System_Object_impl(mPtr).toString()
-    } else if (typeof mPtr == "number" && mPtr != 0) {
-        return new mscorlib_System_Object_impl(ptr(mPtr)).toString()
+    try {
+        if (mPtr instanceof NativePointer && !mPtr.isNull()) {
+            return new mscorlib_System_Object_impl(mPtr).toString()
+        } else if (typeof mPtr == "number" && mPtr != 0) {
+            return new mscorlib_System_Object_impl(ptr(mPtr)).toString()
+        }
+    } catch (error) {
+        return ''
     }
-    return ""
+    return ''
 }
 
 globalThis.getObjClass = (mPtr: NativePointer): NativePointer => {
     if (typeof mPtr == "number") mPtr = ptr(mPtr)
+    if (typeof mPtr == "string" && (mPtr as string).startsWith("0x")) mPtr = ptr(mPtr)
     let obj = new UnityEngine_Object(mPtr)
     return obj.class.handle
 }

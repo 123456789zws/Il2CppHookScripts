@@ -1,5 +1,5 @@
 
-export enum TYPE_STR { U_STR, C_STR }
+export enum TYPE_STR { U_STR, C_STR, OC_STR }
 
 export type PTR = NativePointer | number
 
@@ -208,4 +208,11 @@ export enum JSHOOKTYPE {
     STACK,
     METHOD,
     MEMORY
+}
+
+export enum MethodSortType {
+    ADDRESS = 0, // 默认低地址在前高地址在后
+    ACCESS = 1, // 这个还算比较常用，把public函数提前方便查看
+    MethodName = 2,
+    ARGSCOUNT = 3,
 }

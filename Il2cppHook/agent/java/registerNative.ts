@@ -85,8 +85,12 @@ class RegisterNativeItem {
             let name_ptr = methods.add(i * Process.pointerSize * 3).readPointer()
             let sig_ptr = methods.add(i * Process.pointerSize * 3 + Process.pointerSize).readPointer()
             let fnPtr_ptr = methods.add(i * Process.pointerSize * 3 + Process.pointerSize * 2).readPointer()
-            let method = new JNINativeMethod(name_ptr, sig_ptr, fnPtr_ptr)
-            ret.push(method)
+            try {
+                let method = new JNINativeMethod(name_ptr, sig_ptr, fnPtr_ptr)
+                ret.push(method)
+            } catch (error) {
+                // LOGE(`resolveMethods error:${error}`)
+            }
         }
         return ret
     }
@@ -138,7 +142,7 @@ class JNIHelper {
     }
 
     private HookRegisterNatives() {
-        if (this.addrRegisterNatives != null) {
+        if (!this.addrRegisterNatives.isNull()) {
             Interceptor.attach(this.addrRegisterNatives, {
                 onEnter: (args: InvocationArguments) => {
                     // static jint RegisterNatives(JNIEnv env, jclass clazz, const JNINativeMethod* methods, jint nMethods)
@@ -174,7 +178,8 @@ class JNIHelper {
 
 export { JNIHelper }
 
-globalThis.JNIHelper = JNIHelper.instance
+// enable if needed
+// globalThis.JNIHelper = JNIHelper.instance
 
 declare global {
     var JNIHelper: JNIHelper

@@ -70,7 +70,7 @@ var cancelAllNopedFunction = () => arr_nop_addr.forEach((addr) => Interceptor.re
 
 //detach ---> A(mPtr)
 const detachAll = (mPtr?: ARGM) => {
-    let map_attach_listener = GET_MAP<string, InvocationListener>(MapKAY.map_attach_listener)
+    const map_attach_listener = GET_MAP<string, InvocationListener>(MapKAY.map_attach_listener)
     if (typeof mPtr == "number") mPtr = ptr(mPtr)
     if (mPtr == undefined) {
         map_attach_listener.clear()
@@ -165,14 +165,14 @@ const mapValueToArray = (map: Map<any, any>) => {
     return list
 }
 
-var runOnMain = (UpDatePtr: NativePointer, Callback: Function) => {
-    if (Callback == undefined) return
+var runOnMain = (UpDatePtr?: NativePointer | Function, Callback?: Function) => {
+    if (UpDatePtr ==undefined && Callback == undefined) return
     if (typeof (UpDatePtr) == "function") {
         Callback = UpDatePtr
         UpDatePtr = getEventUpdate<NativePointer>(false)
-    }
-    A(UpDatePtr, () => {
-        if (Callback != undefined && Callback != null) {
+    } 
+    A(UpDatePtr as NativePointer, () => {
+        if (Callback != undefined && Callback != null && typeof(Callback) == "function") {
             try {
                 Callback()
             } catch (e) {
@@ -332,17 +332,21 @@ export const TIME_SIMPLE = (): string => new Date().toLocaleTimeString().split("
 /**
  * 大于最大出现次数返回值为 -1
  * 主要是为了过滤比如setActive中重复出现的一直频繁调用的obj
- * @param {String} objstr 重复出现的str 
+ * @param {String | string} objstr 重复出现的str 
  * @param {int} maxCount 最大出现次数
  * @returns ? -1
  */
-const filterDuplicateOBJ = (objstr: string, maxCount: number = 10) => {
-    if (!GET_MAP(MapKAY.outFilterMap).has(objstr)) {
-        SET_MAP_VALUE(MapKAY.outFilterMap, objstr, 0)
+const debug = false
+const filterDuplicateOBJ = (objstr: string | String, maxCount: number = 10) => {
+    if (debug) LOGW(`Enter filterDuplicateOBJ 1 ${objstr} ${maxCount}`)
+    const localObjStr : string = objstr + ''
+    if (debug) LOGW(`Enter filterDuplicateOBJ 2 ${localObjStr}`)
+    if (GET_MAP(MapKAY.outFilterMap) == undefined || !GET_MAP(MapKAY.outFilterMap)!.has(localObjStr)) {
+        SET_MAP_VALUE(MapKAY.outFilterMap, localObjStr, 0)
         return 0
     }
-    let count = Number(GET_MAP_VALUE(MapKAY.outFilterMap, objstr)) + 1
-    SET_MAP_VALUE(MapKAY.outFilterMap, objstr, count)
+    const count = GET_MAP_VALUE<string, number>(MapKAY.outFilterMap, localObjStr) + 1
+    SET_MAP_VALUE(MapKAY.outFilterMap, localObjStr, count)
     return (count >= maxCount) ? -1 : count
 }
 
@@ -380,7 +384,7 @@ declare global {
     var getJclassName: (jclsName: NativePointer, ShouldRet: boolean) => string | undefined
     var checkCtx: (ctx: CpuContext, type?: "LR" | "PC" | "SP") => void | string
     // var filterDuplicateOBJ: (objstr: string, maxCount?: number) => number
-    var runOnMain: (UpDatePtr: NativePointer, Callback: Function) => void
+    var runOnMain: (UpDatePtr?:  | Function, Callback?: Function) => void
     var runOnNewThread: (Callback: Function) => void
     var SendMessage: (str0: string, str1: string, str2?: string) => void
     var SendMessageImpl: (platform: "IronSource" | "MaxSdkCallbacks" | "MoPubManager" | "TPluginsGameObject") => void
